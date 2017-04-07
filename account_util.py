@@ -1,9 +1,10 @@
+#!/usr/bin/env python
 # -*- mode: python; python-indent-offset: 4; indent-tabs-mode: nil; -*-
 #
-# Sub classes AtomicWrite. Can perform the following functions
-# on an account:
-#    - deposit
-#    - withdraw
+# sub class of AtomicWrite.
+#
+# provides utility functions for an account
+#
 #
 import os
 import logging
@@ -16,16 +17,6 @@ class AccountUtil(AtomicWrite):
     def __init__(self, dir=None):
         AtomicWrite.__init__(self, dir)
         logging.basicConfig(filename='drovebank.log', level=logging.DEBUG)
-
-    # private function that gets account filename
-    def __get_account_filename(self, account_id):
-        fname = "%s.txt" % account_id
-        return os.path.join(self.dbdir, fname)
-
-    # private: check if account file exists.
-    # no error checking on args
-    def __check_account_file(self, account_id):
-        return os.path.exists(self.__get_account_filename(account_id))
 
     # private: makes a deposit to an account. no eror checking
     # of inputs
@@ -75,7 +66,7 @@ class AccountUtil(AtomicWrite):
             err = "account id is not a valid number: %s" % account_id
             self.add_error(err)
             error = True
-        elif self.__check_account_file(account_id) is False:
+        elif self.check_account_file(account_id) is False:
             err = "account id is not valid: %s" % account_id
             self.add_error(err)
             logging.warning("AU0064: unknown account number %s", account_id)
@@ -111,7 +102,7 @@ class AccountUtil(AtomicWrite):
             err = "account id is not a valid number: %s" % account_id
             self.add_error(err)
             error = True
-        elif self.__check_account_file(account_id) is False:
+        elif self.check_account_file(account_id) is False:
             err = "account id is not valid: %s" % account_id
             self.add_error(err)
             logging.warning("AU0102: unknown account number %s", account_id)
@@ -163,6 +154,7 @@ class AccountUtil(AtomicWrite):
     # gets the account information. does not use locks
     def get_account_info(self, account_id):
         error = False
+        self.clear_errors()
 
         # test account id
         if self.isint(account_id) == False:
@@ -170,7 +162,7 @@ class AccountUtil(AtomicWrite):
             err = "account id is not a valid number: %s" % account_id
             self.add_error(err)
             error = True
-        elif self.__check_account_file(account_id) is False:
+        elif self.check_account_file(account_id) is False:
             err = "account id is not valid: %s" % account_id
             self.add_error(err)
             logging.warning("AU0064: unknown account number %s", account_id)
@@ -185,7 +177,7 @@ class AccountUtil(AtomicWrite):
     # private function that reads account info without error
     # checks
     def __read_account_info(self, account_id):
-        filename = self.__get_account_filename(account_id)
+        filename = self.get_account_filename(account_id)
         # read in file
         file = open(filename, 'r')
         file_contents = file.readline()
@@ -196,3 +188,27 @@ class AccountUtil(AtomicWrite):
         Account = namedtuple('Account', 'fname lname balance')
         account = Account(vals[0], vals[1], balance)
         return account
+
+    # public
+    # function that gets account filename
+    # no error checking on args
+    def get_account_filename(self, account_id):
+        fname = "%s.txt" % account_id
+        return os.path.join(self.dbdir, fname)
+
+    # public
+    # check if account file exists.
+    # no error checking on args
+    def check_account_file(self, account_id):
+        return os.path.exists(self.get_account_filename(account_id))
+
+    # public
+    # sets the filenames from the account id
+    def set_account_id(self, account_id):
+        self.id = account_id
+        fname = "%s.txt" % account_id
+        filename = os.path.join(self.dbdir, fname)
+        self.set_file_name(filename)
+
+    def get_id(self):
+        return self.id

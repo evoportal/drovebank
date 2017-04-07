@@ -1,4 +1,8 @@
+#!/usr/bin/env python
 # -*- mode: python; python-indent-offset: 4; indent-tabs-mode: nil; -*-
+#
+# unit tests for AccountUtil
+#
 import unittest
 import os
 import time
@@ -6,7 +10,7 @@ import time
 from account_util import AccountUtil
 from account_create import AccountCreate
 
-class AccountCreate_Test(unittest.TestCase):
+class AccountUtil_Test(unittest.TestCase):
 
     # setup
     def setUp(self):
@@ -47,18 +51,14 @@ class AccountCreate_Test(unittest.TestCase):
         # test bad args
         balance = au.withdraw(100, "shinyobject")
         self.assertEqual(balance, -1)
-        print au.get_error_string()
 
         # test withdraw more then in account
         balance = au.withdraw(70, 200.00)
         self.assertEqual(balance, -1)
-        print au.get_error_string()
 
         # test withdraw negative number
         balance = au.withdraw(70, -1.00)
         self.assertEqual(balance, -1)
-        print au.get_error_string()
-
 
         # test withdraw of 50 bucks
         balance = au.withdraw(70, 50.00)
@@ -70,17 +70,14 @@ class AccountCreate_Test(unittest.TestCase):
         # test bad args
         balance = au.deposit(100, "shinyobject")
         self.assertEqual(balance, -1)
-        print au.get_error_string()
 
         # test deposit negative number
         balance = au.deposit(70, -1.00)
         self.assertEqual(balance, -1)
-        print au.get_error_string()
 
         # test deposit of 500 bucks
         balance = au.deposit(70, 500.00)
         self.assertEqual(balance, 600.00)
-
 
 if __name__ == '__main__':
     unittest.main()

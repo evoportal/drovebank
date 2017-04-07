@@ -9,7 +9,6 @@ class AccountCreate_Test(unittest.TestCase):
 
     # setup
     def setUp(self):
-        print "setup"
         # make a test index file.
         fname = 'index.txt'
         self.dir  = os.getcwd()
@@ -24,18 +23,15 @@ class AccountCreate_Test(unittest.TestCase):
 
 
     def tearDown(self):
-        print "teardown"
         os.remove(self.filename)
 
     def test_get_account_number(self):
-        print "test_get_account_number"
         ac = AccountCreate(self.dir)
         account_num = ac.get_account_number();
         # should be 70
         self.assertEqual(account_num, 70)
 
     def test_create_account(self):
-        print "test_account_create"
         ac = AccountCreate(self.dir)
 
         fname = 'John'

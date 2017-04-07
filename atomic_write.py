@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# -*- mode: python; python-indent-offset: 4; indent-tabs-mode: nil; -*-
+#
+# sub class of DroveBankConstants.
+#
+# Provides methods to exclusivly write data to a file.
+#
 import os, sys, fnmatch
 import shutil
 import string
@@ -14,6 +20,11 @@ class AtomicWrite(DroveBankConstants):
         DroveBankConstants.__init__(self, dir)
         logging.basicConfig(filename='drovebank.log', level=logging.DEBUG)
 
+        self.oldsuffix  = "old"
+        self.tmpsuffix  = "tmp"
+        self.locksuffix = "lock"
+        self.transid    = None
+
         # set the dir for the file
         if dir is not None:
             self.dbdir = dir
@@ -27,20 +38,7 @@ class AtomicWrite(DroveBankConstants):
         else:
             self.filename = None
 
-    # sets the filenames from the account id
-    def set_account_id(self, account_id):
-        fname = "%s.txt" % account_id
-        filename = os.path.join(self.dbdir, fname)
-        self.set_file_name(filename)
-
-    # sets the filename
-    def set_file_name(self, filename):
-        if os.path.exists(filename) == False:
-            logging.critical("input file %s doesn't exist!", filename)
-            sys.exit(-1)
-        self.filename = filename
-        self.make_tmp_filenames()
-
+    # public (for unit test)
     # makes the lock and tmp filenames
     def make_tmp_filenames(self):
         if os.path.isdir(self.dbdir) == False:
@@ -51,18 +49,30 @@ class AtomicWrite(DroveBankConstants):
         basename = os.path.basename(self.filename)
         prefix, suffix = os.path.splitext(basename)
         self.id = self.id_generator()
-        tmpfile = prefix + "_" + self.id + suffix + ".tmp"
-        oldfile = prefix + "_" + self.id + suffix + ".old"
-        lockfile = prefix + ".lock"
+        tmpfile = prefix + "_" + self.id + suffix + "." + self.tmpsuffix
+        oldfile = prefix + "_" + self.id + suffix + "." + self.oldsuffix
+        lockfile = prefix + "." + self.locksuffix
         self.tmpfile = os.path.join(self.dbdir, tmpfile)
         self.oldfile = os.path.join(self.dbdir, oldfile)
         self.lockfilename = os.path.join(self.dbdir, lockfile)
 
+    # public
+    # this will generate a random alpha numeric string 8 charaters
+    # long. if the number of concurrent users increases you could
+    # make the string longer but the probablity of collision is
+    # very low.
     def id_generator(self):
+        # allow for override
+        if self.transid is not None:
+            return self.transid
+
         size=8
         chars=string.ascii_uppercase + string.digits
         return ''.join(random.choice(chars) for _ in range(size))
 
+    # public
+    # locks file
+    # todo: this needs a timeout
     def lock_file(self):
         loop = True
         while(loop):
@@ -73,10 +83,13 @@ class AtomicWrite(DroveBankConstants):
                 logging.debug("AW0069 lock file exists. sleep 1 sec")
                 time.sleep(1)
 
+    # public
+    # unlocks file
     def unlock_file(self):
         self.lockfile.close()
         os.remove(self.lockfilename)
 
+    # public
     # writes content to file but assumes caller handles
     # file locking
     def write_content(self, content):
@@ -109,7 +122,7 @@ class AtomicWrite(DroveBankConstants):
             for fn in files:
                 if fnmatch.fnmatch( fn, pattern ):
                     result.append( os.path.join( subdir, fn ))
-                    return result
+        return result
 
     # if lock file is there and only self.filename then we either crashed before
     # step 1 or after step 5. Either way just delete the lock file and move on.
@@ -121,9 +134,11 @@ class AtomicWrite(DroveBankConstants):
     # - if self.filename is present and tmp is present but not old we crashed before
     # step 3. remove tmp file. Transaction never happened.
     #
-    def recover(self):
+    def recover_write(self):
         # first lets look for lock files.
-        for fn in self.ffind( "*.lock", self.dbdir):
+        srchp = "*.%s" % self.locksuffix
+        for fn in self.ffind(srchp, self.dbdir):
+            logging.info("AW0141:RECOVER found lock file %s", fn);
             basename = fn[:-5]
             # this assumes the suffix is txt probably should make
             # this configurable
@@ -137,20 +152,21 @@ class AtomicWrite(DroveBankConstants):
             prefix, suffix = os.path.splitext(basename)
 
             tmpfile = None
-            tmpfiletest = prefix + "_*" + suffix + ".tmp"
-            for tfile in self.ffind(tmpfiletest, self.dbdir):
-                logging.debug("AW0134 found tmpfile %s", tfile)
+            tmpfiletest = prefix + "_*" + suffix + "." + self.tmpsuffix
+            for tfile in  self.ffind(tmpfiletest, self.dbdir):
+                logging.info("AW0134:RECOVER found tmpfile %s", tfile)
                 tmpfile = tfile
 
             # if we didn't find any tmp files look for old files
             # else use the matching old file
+            oldfile = None
             if tmpfile is None:
-                oldfiletest = prefix + "_*" + suffix + ".old"
+                oldfiletest = prefix + "_*" + suffix + "." + self.oldsuffix
                 for ofile in self.ffind(oldfiletest, self.dbdir):
-                    logging.debug("AW0139 found oldfile %s", ofile)
+                    logging.info("AW0139:RECOVER found oldfile %s", ofile)
                     oldfile = ofile
             else:
-                oldfile = tmpfile.replace("tmp", "old")
+                oldfile = tmpfile.replace(self.tmpsuffix, self.oldsuffix)
 
             oldexists  = False
             if oldfile is not None and os.path.exists(oldfile):
@@ -170,7 +186,7 @@ class AtomicWrite(DroveBankConstants):
             # new file. we know tmp file is valid because the old file was
             # created after the tmp file
             if baseexists is False and oldexists is True and tmpexists is True:
-                logging.debug("AW0074 case 1 completing transaction by renaming tmp file %s to %s",
+                logging.info("AW0074:RECOVER case 1 completing transaction by renaming tmp file %s to %s",
                               tmpfile, filename)
                 shutil.move(tmpfile, filename)
                 tmpexists = False
@@ -179,30 +195,47 @@ class AtomicWrite(DroveBankConstants):
             # all other cases we can only trust what is in the original file or
             # its case one
             if oldexists is True:
-                logging.debug("AW0142 removing old file %s", oldfile)
+                logging.info("AW0142:RECOVER removing old file %s", oldfile)
                 os.remove(oldfile)
             if tmpexists is True:
-                logging.debug("AW0147 removing tmp file %s", tmpfile)
+                logging.info("AW0147:RECOVER removing tmp file %s", tmpfile)
                 os.remove(tmpfile)
             # delete the lock file
-            logging.debug("AW0150 removing lock file %s", fn)
+            logging.info("AW0150:RECOVER removing lock file %s", fn)
             os.remove(fn)
 
+    # public
     # writes content to file with locks.
     def atomicwrite(self, content):
         self.lock_file()
         self.write_content(content)
         self.unlock_file()
 
+    # public
+    # sets the filename and calls make_tmp_filenames
+    def set_file_name(self, filename):
+        if os.path.exists(filename) == False:
+            logging.critical("input file %s doesn't exist!", filename)
+            sys.exit(-1)
+        self.filename = filename
+        self.make_tmp_filenames()
+
     def set_dbdir(self, dbdir):
         self.dbdir = dbdir
 
     # for unit tests
-    def get_id(self):
-        return self.id
     def get_tmpfile(self):
         return self.tmpfile
     def get_oldfile(self):
         return self.oldfile
     def get_lockfilename(self):
         return self.lockfilename
+    def set_old_suffix(self, oldsuffix):
+        self.oldsuffix = oldsuffix
+    def set_tmp_suffix(self, tmpsuffix):
+        self.tmpsuffix = tmpsuffix
+    def set_lock_suffix(self, locksuffix):
+        self.locksuffix = locksuffix
+
+    def set_transid(self, transid):
+        self.transid = transid

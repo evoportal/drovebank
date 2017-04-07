@@ -11,34 +11,34 @@ class AtomicWrite_Test(unittest.TestCase):
 
     # setup
     def setUp(self):
-        print "setup"
-        fname = 'test.txt'
+        fname = '100.txt'
         self.dir = os.getcwd()
         self.filename = os.path.join(self.dir, fname)
 
         # write out some stuff
         f = open(self.filename, 'w')
         f.write('some stuff\n')
-        # don't forget to flush
         f.flush()
         f.close()
 
     def tearDown(self):
-        print "teardown"
-        os.remove(self.filename)
+        if os.path.exists(self.filename):
+            os.remove(self.filename)
 
     def test_idgenerator(self):
-        print "test id"
         aw = AtomicWrite(self.dir, self.filename)
 
         id = aw.id_generator()
         idlen = len(id)
-
         # since it is random all we can check is the length
         self.assertEqual(idlen, 8)
 
+        # test override
+        aw.set_transid("AAAAAAAA")
+        id = aw.id_generator()
+        self.assertEquals(id, 'AAAAAAAA')
+
     def test_make_tmp_filenames(self):
-        print "test make tmp"
         aw = AtomicWrite(self.dir, self.filename)
         # called by AtomicWrite.__init__
         #aw.make_tmp_filenames()
@@ -54,7 +54,6 @@ class AtomicWrite_Test(unittest.TestCase):
         aw.lock_file()
         time.sleep(3)
         aw.unlock_file()
-        print "done"
         return
 
     # test lock function by spinning off a thread
@@ -63,7 +62,6 @@ class AtomicWrite_Test(unittest.TestCase):
     # the file. If the file is indeed locked the
     # time elapsed should be more than 3 seconds
     def test_lock_file(self):
-        print "test lock file"
         t = Thread(target=self.worker, args=(self.filename,self.dir,))
 
         start = time.time()
@@ -82,7 +80,6 @@ class AtomicWrite_Test(unittest.TestCase):
         self.assertTrue( (elapsed > 3.0) )
 
     def test_atomicwrite(self):
-        print "test atomic write"
         aw = AtomicWrite(self.dir, self.filename)
         content = 'testing atomic write\n'
         aw.atomicwrite(content)
@@ -91,45 +88,239 @@ class AtomicWrite_Test(unittest.TestCase):
         file.close()
         self.assertEquals(file_content, content)
 
-    def test_recover_case1(self):
 
-        aw = AtomicWrite(self.dir, self.filename)
+    # this case is just a lock file and nothing else.
+    # this could be a failure just after the lock or
+    # just after deleting the .old file. either way
+    # the data in the file is correct. you can look
+    # in the drovebank.log to see.
+    def test_recover_case0(self):
+        fname = '100.txt'
+        filename = os.path.join(self.dir, fname)
+
+        # write out some stuff
+        f = open(filename, 'w')
+        f.write('some stuff\n')
+        f.flush()
+        f.close()
+
+        aw = AtomicWrite(self.dir, filename)
+
+        # lock the file
+        aw.lock_file()
+
+        # call recover
+        aw.recover_write()
+
+        # make sure all the files are cleaned up
+        self.assertFalse(os.path.exists(aw.get_lockfilename()))
+        self.assertTrue(os.path.exists(filename))
+
+        # make sure the file content is correct
+        file = open(filename, 'r')
+        file_content = file.readline()
+        file.close()
+        self.assertEquals(file_content, 'some stuff\n')
+        os.remove(filename)
+
+    # create case 1 failing after step 1
+    # making the old file and renaming the
+    # tmp file to the filename
+    def test_recover_case1(self):
+        # new filename. python can run these in paralled and
+        # this will lock up the system if it uses the same
+        # file as others
+        fname = '101.txt'
+
+        filename = os.path.join(self.dir, fname)
+        # write out some stuff
+        f = open(filename, 'w')
+        content = 'some stuff\n'
+        f.write(content)
+        f.flush()
+        f.close()
+
+        aw = AtomicWrite(self.dir, filename)
         tmpfile = aw.get_tmpfile()
         oldfile = aw.get_oldfile()
-        # create case 1 where we failed between
-        # making the old file and renaming the
-        # tmp file to the filename
-        shutil.copy2(self.filename, tmpfile)
 
-        newcontent = 'new content\n'
+        # lock the file
+        aw.lock_file()
+
+        #step 1 copy old file to tmp file
+        shutil.copy2(filename, tmpfile)
+
+        # call recover
+        aw.recover_write()
+
+        self.assertFalse(os.path.exists(tmpfile))
+        self.assertFalse(os.path.exists(aw.get_lockfilename()))
+        self.assertTrue(os.path.exists(filename))
+
+        # make sure the file content is correct
+        file = open(filename, 'r')
+        file_content = file.readline()
+        file.close()
+        self.assertEquals(file_content, content)
+        os.remove(filename)
+
+    # create case 2 where we failed during or
+    # after step 2. since writing is not atomic
+    # we can't trust the tmp file and the data
+    # file should have original content
+    def test_recover_case2(self):
+        # new filename. python can run these in paralled and
+        # this will lock up the system if it uses the same
+        # file as others
+        fname = '102.txt'
+
+        filename = os.path.join(self.dir, fname)
+        # write out some stuff
+        f = open(filename, 'w')
+        content = 'some stuff\n'
+        f.write(content)
+        f.flush()
+        f.close()
+
+        aw = AtomicWrite(self.dir, filename)
+        tmpfile = aw.get_tmpfile()
+        oldfile = aw.get_oldfile()
+
+        # lock the file
+        aw.lock_file()
+
+        #step 1 copy old file to tmp file
+        shutil.copy2(filename, tmpfile)
+
+        # step 2 write new data to tmpfile
+        new_content = 'new content\n'
         f = open(tmpfile, 'w')
-        f.write(newcontent)
+        f.write(new_content)
+        f.flush()
+        f.close()
+
+        # call recover
+        aw.recover_write()
+
+        self.assertFalse(os.path.exists(tmpfile))
+        self.assertFalse(os.path.exists(aw.get_lockfilename()))
+        self.assertTrue(os.path.exists(filename))
+
+        # make sure the file content is correct
+        file = open(filename, 'r')
+        file_content = file.readline()
+        file.close()
+        self.assertEquals(file_content, content)
+        os.remove(filename)
+
+    # create case 3 where we failed after
+    # step 3. since step 3 is a move (an atomic
+    # action) we can now trust the tmp file
+    # and the content of the data file should
+    # be the new content
+    def test_recover_case3(self):
+        # new filename. python can run these in paralled and
+        # this will lock up the system if it uses the same
+        # file as others
+        fname = '103.txt'
+
+        filename = os.path.join(self.dir, fname)
+        # write out some stuff
+        f = open(filename, 'w')
+        content = 'some stuff\n'
+        f.write(content)
+        f.flush()
+        f.close()
+
+        aw = AtomicWrite(self.dir, filename)
+        tmpfile = aw.get_tmpfile()
+        oldfile = aw.get_oldfile()
+
+        # lock the file
+        aw.lock_file()
+
+        #step 1 copy old file to tmp file
+        shutil.copy2(filename, tmpfile)
+
+        # step 2 write new data to tmpfile
+        new_content = 'new content\n'
+        f = open(tmpfile, 'w')
+        f.write(new_content)
         f.flush()
         f.close()
 
         #step 3 move orig file to old file
-        shutil.move(self.filename, oldfile)
-
-        lockfile = aw.get_lockfilename()
-        # create a lock file
-        f = open(lockfile, 'w')
-        f.write(newcontent)
-        f.close()
+        shutil.move(filename, oldfile)
 
         # call recover
-        aw.recover()
+        aw.recover_write()
 
-        # make sure all the files are cleaned up
         self.assertFalse(os.path.exists(oldfile))
         self.assertFalse(os.path.exists(tmpfile))
-        self.assertFalse(os.path.exists(lockfile))
-        self.assertTrue(os.path.exists(self.filename))
+        self.assertFalse(os.path.exists(aw.get_lockfilename()))
+        self.assertTrue(os.path.exists(filename))
 
         # make sure the file content is correct
-        file = open(self.filename, 'r')
+        file = open(filename, 'r')
         file_content = file.readline()
         file.close()
-        self.assertEquals(file_content, newcontent)
+        self.assertEquals(file_content, new_content)
+        os.remove(filename)
+
+    # create case 4 (last one!) where we failed after
+    # step 4. we have been able to trust the tmp file
+    # since step 3 so this is just more cleanup
+    def test_recover_case4(self):
+        # new filename. python can run these in paralled and
+        # this will lock up the system if it uses the same
+        # file as others
+        fname = '104.txt'
+
+        filename = os.path.join(self.dir, fname)
+        # write out some stuff
+        f = open(filename, 'w')
+        content = 'some stuff\n'
+        f.write(content)
+        f.flush()
+        f.close()
+
+        aw = AtomicWrite(self.dir, filename)
+        tmpfile = aw.get_tmpfile()
+        oldfile = aw.get_oldfile()
+
+        # lock the file
+        aw.lock_file()
+
+        #step 1 copy old file to tmp file
+        shutil.copy2(filename, tmpfile)
+
+        # step 2 write new data to tmpfile
+        new_content = 'new content\n'
+        f = open(tmpfile, 'w')
+        f.write(new_content)
+        f.flush()
+        f.close()
+
+        #step 3 move orig file to old file
+        shutil.move(filename, oldfile)
+
+        # step 4 rename tmp file to orig file
+        shutil.move(tmpfile, filename)
+
+        # call recover
+        aw.recover_write()
+
+        self.assertFalse(os.path.exists(oldfile))
+        self.assertFalse(os.path.exists(tmpfile))
+        self.assertFalse(os.path.exists(aw.get_lockfilename()))
+        self.assertTrue(os.path.exists(filename))
+
+        # make sure the file content is correct
+        file = open(filename, 'r')
+        file_content = file.readline()
+        file.close()
+        self.assertEquals(file_content, new_content)
+        os.remove(filename)
 
 if __name__ == '__main__':
     unittest.main()
