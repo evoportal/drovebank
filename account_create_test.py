@@ -10,7 +10,7 @@ class AccountCreate_Test(unittest.TestCase):
     # setup
     def setUp(self):
         # make a test index file.
-        fname = 'index.txt'
+        fname = 'index.idx'
         self.dir  = os.getcwd()
         self.filename = os.path.join(self.dir, fname)
 

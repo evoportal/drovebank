@@ -42,7 +42,7 @@ class AtomicWrite(DroveBankConstants):
     # makes the lock and tmp filenames
     def make_tmp_filenames(self):
         if os.path.isdir(self.dbdir) == False:
-            logging.critical("DB file directory %s doesn't exist!", self.dbdir)
+            logging.critical("AW0045 DB file directory %s doesn't exist!", self.dbdir)
             sys.exit(-1)
 
         # get the file without any preceding path
@@ -215,7 +215,7 @@ class AtomicWrite(DroveBankConstants):
     # sets the filename and calls make_tmp_filenames
     def set_file_name(self, filename):
         if os.path.exists(filename) == False:
-            logging.critical("input file %s doesn't exist!", filename)
+            logging.critical("AW0086 input file %s doesn't exist!", filename)
             sys.exit(-1)
         self.filename = filename
         self.make_tmp_filenames()

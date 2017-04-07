@@ -14,7 +14,7 @@ class AccountUtil_Test(unittest.TestCase):
 
     # setup
     def setUp(self):
-        fname = "index.txt"
+        fname = "index.idx"
         self.dir  = os.getcwd()
         self.indexname = os.path.join(self.dir, fname)
         # name the account will create

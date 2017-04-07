@@ -20,7 +20,7 @@ class AccountActions_Test(unittest.TestCase):
         #unit tests run in the current directory
         self.dir  = os.getcwd()
         # make a test index file.
-        fname = 'index.txt'
+        fname = 'index.idx'
         self.indexfile = os.path.join(self.dir, fname)
 
         # write out some stuff

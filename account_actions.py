@@ -182,7 +182,6 @@ class AccountActions(AccountUtil):
     # happen is we have matching IDs in xtmp or xold files.
     def recover_transfer(self, lockfile_1, lockfile_2):
 
-        print "%s %s" % (lockfile_1, lockfile_2)
         # since this is a transfer we need to set the suffix
         self.set_old_suffix("xold")
         self.set_tmp_suffix("xtmp")
@@ -192,8 +191,6 @@ class AccountActions(AccountUtil):
 
         xtmp1_exists = self.__file_exists(files_1.tmpfile)
         xtmp2_exists = self.__file_exists(files_2.tmpfile)
-        print "1 %s %s" % (xtmp1_exists, files_1.tmpfile)
-        print "2 %s %s" % (xtmp2_exists, files_2.tmpfile)
 
         xold1_exists = self.__file_exists(files_1.oldfile)
         xold2_exists = self.__file_exists(files_2.oldfile)
@@ -264,3 +261,19 @@ class AccountActions(AccountUtil):
         Account = namedtuple('Account', 'fname lname balance')
         account = Account(vals[0], vals[1], balance)
         return account
+
+    def print_accounts(self):
+        account_list = []
+        str = "ID\tName\tBalance"
+        account_list.append(str)
+        for dfile in self.ffind("*.txt", self.dbdir):
+            logging.debug("AA0271 found data file %s", dfile)
+            basename = os.path.basename(dfile)
+            prefix, suffix = os.path.splitext(basename)
+            ac_id = int(prefix)
+
+            ac_info = self.__read_account_info(dfile)
+            ac = '%d\t%s %s\t%8.2f' % (ac_id, ac_info.fname,
+                                       ac_info.lname, float(ac_info.balance))
+            account_list.append(ac)
+        return account_list

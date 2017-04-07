@@ -112,7 +112,7 @@ class AccountUtil(AtomicWrite):
         if error is True:
             return -1
 
-        # call make deposit.
+        # call make withdraw
         balance = self.__make_withdraw(account_id, amount)
         return balance
 

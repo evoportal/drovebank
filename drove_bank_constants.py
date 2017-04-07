@@ -2,6 +2,7 @@
 #
 # Constants
 import logging
+import os
 
 class DroveBankConstants:
 
@@ -14,7 +15,7 @@ class DroveBankConstants:
         else:
             self.dbdir = '/home/tom/dbfiles'
 
-        self.index_filename = 'index.txt'
+        self.index_filename = os.path.join(self.dbdir, 'index.idx')
         self.errors = []
 
     def get_index_filename(self):

@@ -5,149 +5,296 @@
 #
 # should be called if the server has crashed before running any clients.
 #
-import os, sys, fnmatch
-import shutil
-import string
-import random
-import time
+import os, sys
 import logging
-import re
 import argparse
 
-from account_util import AccountUtil
+from account_create import AccountCreate
 from account_actions import AccountActions
-from atomic_write import AtomicWrite
-from collections import namedtuple
 
-try:
-    mode=int(raw_input('Input:'))
-except ValueError:
-    print "Not a number"
-class Recover(AccountActions):
+# python doesn't have a switch statement so I
+# emulated one using
+class switch(object):
+    def __init__(self, value):
+        self.value = value
+        self.fall = False
+
+    def __iter__(self):
+        """Return the match method once, then stop"""
+        yield self.match
+        raise StopIteration
+
+    def match(self, *args):
+        """Indicate whether or not to enter a case suite"""
+        if self.fall or not args:
+            return True
+        elif self.value in args: # changed for v1.5, see below
+            self.fall = True
+            return True
+        else:
+            return False
+
+class DroveBank(AccountActions):
 
     def __init__(self, dir=None):
         AccountActions.__init__(self, dir)
+        self.client_list_dirty = True
+        self.client_list = []
+
+        #  create the index file
+        if os.path.exists(self.dbdir) is False:
+            logging.critical("DB0046 The data directory doesn't exist: %s", self.dbdir)
+            print "The data directory doesn't exist: %s" % self.dbdir
+            sys.exit(-1)
+
+        # make the index file if needed
+        index_filename = os.path.join(self.dbdir, "index.idx")
+        if os.path.exists(index_filename) is False:
+            logging.info("DB0011 making index file: %s", index_filename)
+            f = open(index_filename, 'w')
+            f.write('0\n')
+            f.close()
 
     # public
     # transfers money from one account to another.
     # returns True on success False on failue
     # error string can be retrieved using get_error_string
-    def recover(self):
-        self.__recover_transfers()
-        self.recover_write()
+    def run(self):
+        should_exit = False
 
-    def __recover_transfers(self):
-        pair_hash = self.find_pairs()
-        for transid, pset in pair_hash.iteritems():
+        self.__print_main_menu_text()
 
-            # look for sole survior (should only happen
-            # if crashed in the middle of step 4
-            if len(pset) == 1:
-                self.__handle_sole_pset(transid, pset)
+        while should_exit is False:
+            command = raw_input('Command [toplevel]: ')
+            for case in switch(command):
+                if case('e'):
+                    should_exit = True
+                    print "Bye!"
+                    break
+                if case('q'):
+                    should_exit = True
+                    print "Bye!"
+                    break
+                if case('h'):
+                    self.__print_main_menu_text()
+                    break
+                if case('l'):
+                    self.__print_accounts()
+                    break
+                if case('c'):
+                    self.__create_account()
+                    break
+                if case('w'):
+                    self.__withdraw()
+                    break
+                if case('d'):
+                    self.__deposit()
+                    break
+                if case('t'):
+                    self.__transfer()
+                    break
+                if case():
+                    print "Unknown command %s" % (command)
+
+    def __create_account(self):
+        print "Adding a client"
+        print "At any time you want to exit hit 'q'\n"
+        command = raw_input('First Name [account creation]: ')
+        if command == 'q':
+            return
+        fname = command
+
+        command = raw_input('Last Name [account creation]: ')
+        if command == 'q':
+            return
+        lname = command
+
+        aloop = True
+        balance = 0
+        while aloop:
+            balance = raw_input('Starting Balance [account creation]: ')
+            if balance == 'q':
+                return
+            if self.isfloat(balance) is False:
+                print "Starting balance must be a number: %s" % balance
+                continue
+            aloop = False
+
+        self.clear_errors()
+        ac = AccountCreate(self.dbdir)
+        # since we added an account we can't use the cached
+        # version.
+        self.client_list_dirty = True
+        id = ac.create_account(fname, lname, balance)
+
+        if id == -1:
+            print "There was a problem creating your account"
+            print ac.get_error_string()
+        else:
+            print "Account created successfully, id = %s"% id
+
+    def __withdraw(self):
+        print "Withdraw money from an account"
+        print "At any time you want to exit hit 'q'\n"
+
+        idloop = True
+        ac_id = -1
+        balance = 0
+        while idloop is True:
+            self.clear_errors()
+            ac_id = raw_input('Account ID [withdraw]: ')
+            if ac_id == 'q':
+                return
+            if self.isint(ac_id) is False:
+                print "account id must be an integer"
                 continue
 
-            plist = list(pset)
-            lockfile_1 = self.__make_lock_filename(plist[0])
-            lockfile_2 = self.__make_lock_filename(plist[1])
+            balance = self.__print_account_balance(ac_id)
+            if balance == -1:
+                print ac.get_error_string()
+                continue
+            idloop = False
 
-            # AccountActions.recover_transfer will clean up
-            # this transfer
-            aa = AccountActions(self.dbdir)
-            aa.recover_transfer(lockfile_1, lockfile_2)
+        print "Old balance for id %s is %8.2f" % (ac_id, float(balance))
+
+        wloop = True
+        while wloop is True:
+            self.clear_errors()
+            withdraw = raw_input('Amount [withdraw]: ')
+            if withdraw == 'q':
+                return
+            if self.isfloat(withdraw) is False:
+                print "This field only accepts numbers"
+                continue
+            if (float(balance) - float(withdraw)) < 0.0:
+                print "You can't withdraw more money than you have"
+                continue
+
+            new_balance = self.withdraw(ac_id, float(withdraw))
+            if new_balance == -1:
+                print ac.get_error_string()
+            wloop = False
+
+        print "New balance for id %s is %8.2f" % (ac_id, float(new_balance))
+
+    def __deposit(self):
+        print "Deposit money to an account"
+        print "At any time you want to exit hit 'q'\n"
+
+        idloop = True
+        ac_id = 0
+        while idloop is True:
+            self.clear_errors()
+            ac_id = raw_input('Account ID [deposit] : ')
+            if ac_id == 'q':
+                return
+            if self.isint(ac_id) is False:
+                print "account id must be an integer"
+                continue
+            idloop = False
+
+        dloop = True
+        while dloop is True:
+            self.clear_errors()
+            deposit = raw_input('Amount [deposit] : ')
+            if deposit == 'q':
+                return
+            if self.isfloat(deposit) is False:
+                print "This field only accepts numbers"
+                continue
+
+            new_balance = self.deposit(ac_id, float(deposit))
+            if new_balance == -1:
+                print ac.get_error_string()
+                continue
+            dloop = False
+            print "New balance for id %s is %8.2f" % (ac_id, float(new_balance))
+
+    def __transfer(self):
+        print "Transfer money from one account to another"
+        print "At any time you want to exit hit 'q'\n"
+
+        idloop = True
+        while idloop is True:
+            self.clear_errors()
+            from_id = raw_input('From ID [xfer]: ')
+            if from_id == 'q':
+                return
+            to_id = raw_input('To ID [xfer]: ')
+            if to_id == 'q':
+                return
+            from_balance = self.__print_account_balance(from_id)
+            if from_balance == -1:
+                print self.get_error_string()
+                continue
+            to_balance = self.__print_account_balance(to_id)
+            if to_balance == -1:
+                print self.get_error_string()
+                continue
+            print "Current Balances: %s = %8.2f to %s = %8.2f" % (from_id,
+                                                            float(from_balance),
+                                                                  to_id, float(to_balance))
+            idloop = False
+
+        xloop = True
+        while xloop is True:
+            self.clear_errors()
+            amount = raw_input('Amount [xfer]: ')
+            if amount == 'q':
+                return
+
+            if self.isfloat(amount) is False:
+                print "This field only accepts numbers"
+                continue
+
+            new_balance = self.transfer_money(from_id, to_id, float(amount))
+            if new_balance == -1:
+                print ac.get_error_string()
+                continue
+            xloop = False
+            fb = float(from_balance) - float(amount)
+            tb = float(to_balance) + float(amount)
+            print "New balances: %s = %8.2f to %s = %8.2f" % (from_id,
+                                                              fb, to_id, tb)
+
+    def __print_main_menu_text(self):
+        print "Welcome to Drove Bank"
+        print "This is the main menu"
+        print "The following commands are available:"
+        print "\tl - list the accounts"
+        print "\tc - create an account"
+        print "\tt - transfer money between two accounts"
+        print "\td - deposit money to an account"
+        print "\tw - withdraw money from an account"
+        print "\th - prints this"
+        print "\te - exit"
+
+    def __print_accounts(self):
+        if self.client_list_dirty is True:
+            self.client_list = self.print_accounts()
+            self.client_list_dirty = False
+        for line in self.client_list:
+            print line
+
+    # returns the balance from the id
+    def __print_account_balance(self, id):
+        ac_info = self.get_account_info(id)
+        if ac_info is None:
+            print self.get_error_string()
+            return -1
+
+        balance = ac_info.balance
+        return balance
 
 
-    # find the pairs of transactions
-    def find_pairs(self):
-        self.set_tmp_suffix("xtmp")
-        self.set_old_suffix("xold")
-
-        pair_hash = {}
-        p = re.compile('(^\d+\w)(\w{8})')
-
-        tmpfile = None
-        tmpfiletest = "*." + self.tmpsuffix
-        for tfile in self.ffind(tmpfiletest, self.dbdir):
-            tmpfile = tfile
-            basename = os.path.basename(tmpfile)
-
-            # use regex to extract transid and pid
-            m = p.match(basename)
-            transid = m.group(2)
-            pid = int(m.group(1).replace("_", ""))
-            logging.debug("RCVR0050 tfile = %s pid = %s transid = %s", tfile, pid, transid)
-
-            # build pairs of pids using a set
-            if transid in pair_hash:
-                pset = pair_hash[transid]
-                if pid not in pset:
-                    pset.add(pid)
-            else:
-                pset = set()
-                pset.add(pid)
-                pair_hash[transid] = pset
-
-
-        # if we didn't find any tmp files look for old files
-        # else use the matching old file
-        oldfile = None
-        oldfiletest = "*." + self.oldsuffix
-        for ofile in self.ffind(oldfiletest, self.dbdir):
-            oldfile = ofile
-            basename = os.path.basename(oldfile)
-
-            # use regex to extract transid and pid
-            m = p.match(basename)
-            transid = m.group(2)
-            pid = int(m.group(1).replace("_", ""))
-
-            # build pairs of pids using a set
-            logging.debug("RCVR0072 ofile = %s pid = %s transid = %s", ofile, pid, transid)
-            if transid in pair_hash:
-                pset = pair_hash[transid]
-                if pid not in pset:
-                    pset.add(pid)
-            else:
-                pset = set()
-                pset.add(pid)
-                pair_hash[transid] = pset
-
-        return pair_hash
-
-    # there be private utility functions down here.
-    def __make_lock_filename(self, pid):
-        basename = "%d.lock" % pid
-        fname = os.path.join(self.dbdir, basename)
-
-        logging.debug("RCVR0103 making lock filename %s", fname)
-
-        return fname
-
-    def __safe_os_remove(self, filename):
-        if os.path.exists(filename) is True:
-            os.remove(filename)
-
-    def __handle_sole_pset(self, transid, pset):
-        pid = list(pset)[0]
-        logging.debug("RCVR011 handle sole pset %s %d", transid, pid)
-
-        lockfile = self.__make_lock_filename(pid)
-
-        oldbase = "%d_%s.txt.xold" % (pid, transid)
-        oldfile = os.path.join(self.dbdir, oldbase)
-
-        tmpbase = "%d_%s.txt.xtmp" % (pid, transid)
-        tmpfile = os.path.join(self.dbdir, tmpbase)
-
-        self.__safe_os_remove(tmpfile)
-        self.__safe_os_remove(oldfile)
-        self.__safe_os_remove(lockfile)
 
 def main():
-  parser = argparse.ArgumentParser(description='recover db from system crash')
-  parser.add_argument('-d', '--dir', help='data directory', default=None)
-  args = parser.parse_args()
-  in_dir = args.dir
-  Recover(in_dir).recover()
+
+    parser = argparse.ArgumentParser(description='Drove Bank Client')
+    parser.add_argument('-d', '--dir', help='data directory', default=None)
+    args = parser.parse_args()
+    in_dir = args.dir
+    DroveBank(in_dir).run()
 
 if __name__ == "__main__":
   main()
